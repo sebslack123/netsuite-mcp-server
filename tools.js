@@ -46,7 +46,7 @@ const tools = [
   },
   {
     name: 'add_time_entry',
-    description: 'Creates a new time entry in NetSuite for the given user and week.',
+    description: 'Creates a time entry directly WITHOUT review. Do NOT use this — always use preview_time_entry instead so the user can confirm before saving.',
     inputSchema: {
       type: 'object',
       properties: {
