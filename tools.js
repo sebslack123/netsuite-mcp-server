@@ -184,11 +184,12 @@ const tools = [
   },
   {
     name: 'preview_time_entry',
-    description: 'Sends a Block Kit review card to the user\'s DM so they can review, edit, and confirm before the entry is saved. Use this instead of add_time_entry when the user wants to review first.',
+    description: 'Posts an interactive Block Kit review card into the current Slack conversation so the user can review, edit dropdowns, and confirm before saving. ALWAYS pass channel_id (the current channel) so the card appears inline — do NOT omit it. Use this instead of add_time_entry.',
     inputSchema: {
       type: 'object',
       properties: {
-        user_id: { type: 'string', description: 'Slack user ID (e.g. U12345)' },
+        user_id: { type: 'string', description: 'User name (e.g. "jessica") or Slack user ID' },
+        channel_id: { type: 'string', description: 'REQUIRED: Slack channel ID of the current conversation — pass this so the review card appears inline, not in DMs' },
         week_key: { type: 'string', description: 'ISO week key. Omit for current week.' },
         project: { type: 'string', description: 'Full project name from list_projects' },
         case_task_event: { type: 'string', description: 'Task type from list_task_types' },
@@ -204,16 +205,19 @@ const tools = [
         hours_sat: { type: 'number', description: 'Hours on Saturday (0 if none)' },
         hours_sun: { type: 'number', description: 'Hours on Sunday (0 if none)' },
       },
-      required: ['user_id', 'project', 'case_task_event', 'service_team', 'billable', 'billing'],
+      required: ['user_id', 'channel_id', 'project', 'case_task_event', 'service_team', 'billable', 'billing'],
     },
     handler: async (args) => {
       const uid = await resolveUser(args.user_id);
       const wk = args.week_key || db.currentWeekKey();
 
-      const dm = await slack.conversations.open({ users: uid });
-      const channel = dm.channel.id;
+      // Post inline in the current channel; fall back to DM if channel_id not provided
+      let channel = args.channel_id;
+      if (!channel) {
+        const dm = await slack.conversations.open({ users: uid });
+        channel = dm.channel.id;
+      }
 
-      // Create pending entry (no slack_ts yet)
       const pending = await db.createPendingEntry({
         user_id: uid,
         week_key: wk,
