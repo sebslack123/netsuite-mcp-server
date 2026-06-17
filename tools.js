@@ -150,8 +150,6 @@ const tools = [
       return { week_key: wk, status, total_hours: total, billable_hours: billable, entry_count: entries.length };
     },
   },
-];
-
   {
     name: 'preview_time_entry',
     description: 'Sends a Block Kit review card to the user\'s DM so they can review, edit, and confirm before the entry is saved. Use this instead of add_time_entry when the user wants to review first.',
