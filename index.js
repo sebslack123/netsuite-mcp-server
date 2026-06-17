@@ -23,8 +23,8 @@ function buildMcpServer() {
     for (const [key, def] of Object.entries(tool.inputSchema.properties || {})) {
       const required = (tool.inputSchema.required || []).includes(key);
       let zType;
-      if (def.type === 'boolean') zType = z.boolean();
-      else if (def.type === 'number') zType = z.number();
+      if (def.type === 'boolean') zType = z.union([z.boolean(), z.string().transform(v => v === 'true')]);
+      else if (def.type === 'number') zType = z.union([z.number(), z.string().transform(v => parseFloat(v) || 0)]);
       else if (def.type === 'object') zType = z.record(z.string(), z.number());
       else zType = z.string();
       if (def.description) zType = zType.describe(def.description);

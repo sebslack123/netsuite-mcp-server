@@ -49,20 +49,26 @@ const tools = [
         sg_ticket: { type: 'string', description: 'Optional SG ticket number e.g. SG-1234' },
         billable: { type: 'boolean', description: 'Whether the time is billable' },
         billing: { type: 'string', description: 'Billing target: Sofigate, Customer, or Non-billable' },
-        hours: {
-          type: 'object',
-          description: 'Hours per day. Omit days with 0 hours.',
-          properties: {
-            mon: { type: 'number' }, tue: { type: 'number' }, wed: { type: 'number' },
-            thu: { type: 'number' }, fri: { type: 'number' }, sat: { type: 'number' }, sun: { type: 'number' },
-          },
-        },
+        hours_mon: { type: 'number', description: 'Hours on Monday (0 if none)' },
+        hours_tue: { type: 'number', description: 'Hours on Tuesday (0 if none)' },
+        hours_wed: { type: 'number', description: 'Hours on Wednesday (0 if none)' },
+        hours_thu: { type: 'number', description: 'Hours on Thursday (0 if none)' },
+        hours_fri: { type: 'number', description: 'Hours on Friday (0 if none)' },
+        hours_sat: { type: 'number', description: 'Hours on Saturday (0 if none)' },
+        hours_sun: { type: 'number', description: 'Hours on Sunday (0 if none)' },
       },
-      required: ['user_id', 'project', 'case_task_event', 'service_team', 'billable', 'billing', 'hours'],
+      required: ['user_id', 'project', 'case_task_event', 'service_team', 'billable', 'billing'],
     },
     handler: async (args) => {
       const wk = args.week_key || db.currentWeekKey();
-      const entry = await db.addTimeEntry(args.user_id, wk, args);
+      // Accept flat hours_mon/tue/... fields
+      const entry = await db.addTimeEntry(args.user_id, wk, {
+        ...args,
+        hours: {
+          mon: args.hours_mon || 0, tue: args.hours_tue || 0, wed: args.hours_wed || 0,
+          thu: args.hours_thu || 0, fri: args.hours_fri || 0, sat: args.hours_sat || 0, sun: args.hours_sun || 0,
+        },
+      });
       return { success: true, entry };
     },
   },
