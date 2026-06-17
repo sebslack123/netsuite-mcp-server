@@ -5,6 +5,10 @@ const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/ser
 const { z } = require('zod');
 const db = require('./db');
 const tools = require('./tools');
+const { buildReviewCard, buildConfirmedCard, buildCancelledCard } = require('./review-blocks');
+const { WebClient } = require('@slack/web-api');
+
+const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 const app = express();
 app.use(express.json());
@@ -43,6 +47,62 @@ function buildMcpServer() {
 
   return server;
 }
+
+// ── REST endpoints for Bolt app callbacks ─────────────────────────────────────
+
+// Confirm → move pending to committed, update Slack message
+app.post('/pending/:id/confirm', async (req, res) => {
+  try {
+    const pending = await db.getPendingEntry(req.params.id);
+    if (!pending) return res.status(404).json({ error: 'Not found' });
+    const committed = await db.movePendingToCommitted(req.params.id);
+    await slack.chat.update({
+      channel: pending.slack_channel,
+      ts: pending.slack_ts,
+      text: 'Time entry saved to NetSuite',
+      blocks: buildConfirmedCard(committed),
+    }).catch(() => null);
+    res.json({ success: true, entry: committed });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Cancel → delete pending, update Slack message
+app.delete('/pending/:id', async (req, res) => {
+  try {
+    const pending = await db.getPendingEntry(req.params.id);
+    if (!pending) return res.status(404).json({ error: 'Not found' });
+    await db.deletePendingEntry(req.params.id);
+    await slack.chat.update({
+      channel: pending.slack_channel,
+      ts: pending.slack_ts,
+      text: 'Time entry cancelled',
+      blocks: buildCancelledCard(),
+    }).catch(() => null);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Patch field → update pending, return new blocks
+app.patch('/pending/:id', async (req, res) => {
+  try {
+    const updated = await db.updatePendingEntry(req.params.id, req.body);
+    if (!updated) return res.status(404).json({ error: 'Not found' });
+    const blocks = buildReviewCard(updated);
+    await slack.chat.update({
+      channel: updated.slack_channel,
+      ts: updated.slack_ts,
+      text: 'NetSuite time entry review',
+      blocks,
+    }).catch(() => null);
+    res.json({ success: true, pending: updated });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // All MCP traffic — stateless mode (new server+transport per request)
 app.all('/mcp', async (req, res) => {
