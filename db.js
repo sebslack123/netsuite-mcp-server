@@ -143,7 +143,7 @@ async function createPendingEntry(data) {
     `INSERT INTO pending_entries
       (user_id, week_key, slack_channel, project, case_task_event, service_team, sg_ticket, billable, billing,
        hours_mon, hours_tue, hours_wed, hours_thu, hours_fri, hours_sat, hours_sun)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      RETURNING *`,
     [
       data.user_id, data.week_key, data.slack_channel,
