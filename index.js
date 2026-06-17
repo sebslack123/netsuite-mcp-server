@@ -9,47 +9,44 @@ const tools = require('./tools');
 const app = express();
 app.use(express.json());
 
-// Health check
-app.get('/', (req, res) => res.json({ status: 'ok', service: 'NetSuite MCP Server' }));
+app.get('/', (req, res) => res.json({ status: 'ok', service: 'NetSuite MCP Server', tools: tools.map(t => t.name) }));
 
-// MCP endpoint — one transport per request (stateless)
 app.post('/mcp', async (req, res) => {
-  const server = new McpServer({
-    name: 'netsuite-timelog',
-    version: '1.0.0',
-  });
+  const server = new McpServer({ name: 'netsuite-timelog', version: '1.0.0' });
 
   for (const tool of tools) {
-    // Build zod schema from inputSchema properties
-    const schemaProps = {};
+    const schemaShape = {};
     for (const [key, def] of Object.entries(tool.inputSchema.properties || {})) {
-      let z_type;
-      if (def.type === 'string') z_type = z.string().describe(def.description || '');
-      else if (def.type === 'boolean') z_type = z.boolean().describe(def.description || '');
-      else if (def.type === 'number') z_type = z.number().describe(def.description || '');
-      else if (def.type === 'object') z_type = z.record(z.number()).describe(def.description || '');
-      else z_type = z.any();
-
       const required = (tool.inputSchema.required || []).includes(key);
-      schemaProps[key] = required ? z_type : z_type.optional();
+      let zType;
+      if (def.type === 'boolean') zType = z.boolean();
+      else if (def.type === 'number') zType = z.number();
+      else if (def.type === 'object') zType = z.record(z.string(), z.number());
+      else zType = z.string();
+      if (def.description) zType = zType.describe(def.description);
+      schemaShape[key] = required ? zType : zType.optional();
     }
 
-    server.tool(tool.name, tool.description, schemaProps, async (args) => {
-      const result = await tool.handler(args);
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    server.tool(tool.name, tool.description, schemaShape, async (args) => {
+      try {
+        const result = await tool.handler(args);
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (err) {
+        return { content: [{ type: 'text', text: JSON.stringify({ error: err.message }) }], isError: true };
+      }
     });
   }
 
-  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-  res.on('close', () => transport.close());
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => `session-${Date.now()}`,
+  });
+
+  res.on('close', () => transport.close().catch(() => null));
   await server.connect(transport);
   await transport.handleRequest(req, res, req.body);
 });
 
-// SSE GET for MCP (some clients use GET for SSE stream)
-app.get('/mcp', async (req, res) => {
-  res.status(405).json({ error: 'Use POST for MCP requests' });
-});
+app.get('/mcp', (req, res) => res.status(405).json({ error: 'Use POST for MCP requests' }));
 
 const PORT = process.env.PORT || 3000;
 
