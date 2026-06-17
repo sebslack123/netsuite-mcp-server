@@ -9,9 +9,6 @@ const tools = require('./tools');
 const app = express();
 app.use(express.json());
 
-// In-memory session store for SSE connections
-const sessions = new Map();
-
 app.get('/', (req, res) => res.json({
   status: 'ok',
   service: 'NetSuite MCP Server',
@@ -47,57 +44,22 @@ function buildMcpServer() {
   return server;
 }
 
-// GET /mcp — SSE session establishment (Slack uses this to load tools)
-app.get('/mcp', async (req, res) => {
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => `session-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  });
+// All MCP traffic — stateless mode (new server+transport per request)
+app.all('/mcp', async (req, res) => {
+  try {
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined, // stateless — no session negotiation needed
+    });
 
-  const server = buildMcpServer();
-
-  const sessionId = `get-${Date.now()}`;
-  sessions.set(sessionId, { server, transport });
-
-  res.on('close', () => {
-    transport.close().catch(() => null);
-    sessions.delete(sessionId);
-  });
-
-  await server.connect(transport);
-  await transport.handleRequest(req, res, req.body);
-});
-
-// POST /mcp — standard JSON-RPC requests
-app.post('/mcp', async (req, res) => {
-  // Check if this belongs to an existing session
-  const sessionId = req.headers['mcp-session-id'];
-  if (sessionId && sessions.has(sessionId)) {
-    const { transport } = sessions.get(sessionId);
+    const server = buildMcpServer();
+    res.on('close', () => transport.close().catch(() => null));
+    await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
-    return;
-  }
-
-  // New stateless request
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => `session-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  });
-
-  const server = buildMcpServer();
-
-  res.on('close', () => transport.close().catch(() => null));
-  await server.connect(transport);
-  await transport.handleRequest(req, res, req.body);
-});
-
-// DELETE /mcp — session cleanup
-app.delete('/mcp', async (req, res) => {
-  const sessionId = req.headers['mcp-session-id'];
-  if (sessionId && sessions.has(sessionId)) {
-    const { transport } = sessions.get(sessionId);
-    await transport.handleRequest(req, res, req.body);
-    sessions.delete(sessionId);
-  } else {
-    res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('MCP error:', err.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message });
+    }
   }
 });
 
