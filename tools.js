@@ -5,6 +5,10 @@ const { WebClient } = require('@slack/web-api');
 
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
+async function resolveUser(nameOrId) {
+  return db.resolveUserId(nameOrId);
+}
+
 const tools = [
   {
     name: 'list_projects',
@@ -30,9 +34,10 @@ const tools = [
       required: ['user_id'],
     },
     handler: async ({ user_id, week_key }) => {
+      const uid = await resolveUser(user_id);
       const wk = week_key || db.currentWeekKey();
-      const entries = await db.getWeekEntries(user_id, wk);
-      const status = await db.getTimesheetStatus(user_id, wk);
+      const entries = await db.getWeekEntries(uid, wk);
+      const status = await db.getTimesheetStatus(uid, wk);
       const total = entries.reduce((s, e) =>
         s + [e.hours_mon, e.hours_tue, e.hours_wed, e.hours_thu, e.hours_fri, e.hours_sat, e.hours_sun]
           .reduce((a, h) => a + parseFloat(h || 0), 0), 0);
@@ -64,9 +69,9 @@ const tools = [
       required: ['user_id', 'project', 'case_task_event', 'service_team', 'billable', 'billing'],
     },
     handler: async (args) => {
+      const uid = await resolveUser(args.user_id);
       const wk = args.week_key || db.currentWeekKey();
-      // Accept flat hours_mon/tue/... fields
-      const entry = await db.addTimeEntry(args.user_id, wk, {
+      const entry = await db.addTimeEntry(uid, wk, {
         ...args,
         hours: {
           mon: args.hours_mon || 0, tue: args.hours_tue || 0, wed: args.hours_wed || 0,
@@ -124,9 +129,10 @@ const tools = [
       required: ['user_id'],
     },
     handler: async ({ user_id, week_key }) => {
+      const uid = await resolveUser(user_id);
       const wk = week_key || db.currentWeekKey();
-      await db.setTimesheetStatus(user_id, wk, 'submitted');
-      return { success: true, user_id, week_key: wk, status: 'submitted' };
+      await db.setTimesheetStatus(uid, wk, 'submitted');
+      return { success: true, user_id: uid, week_key: wk, status: 'submitted' };
     },
   },
   {
@@ -141,13 +147,39 @@ const tools = [
       required: ['user_id'],
     },
     handler: async ({ user_id, week_key }) => {
+      const uid = await resolveUser(user_id);
       const wk = week_key || db.currentWeekKey();
-      const entries = await db.getWeekEntries(user_id, wk);
-      const status = await db.getTimesheetStatus(user_id, wk);
+      const entries = await db.getWeekEntries(uid, wk);
+      const status = await db.getTimesheetStatus(uid, wk);
       const DAY_KEYS = ['hours_mon', 'hours_tue', 'hours_wed', 'hours_thu', 'hours_fri', 'hours_sat', 'hours_sun'];
       const total = entries.reduce((s, e) => s + DAY_KEYS.reduce((a, k) => a + parseFloat(e[k] || 0), 0), 0);
       const billable = entries.filter(e => e.billable).reduce((s, e) => s + DAY_KEYS.reduce((a, k) => a + parseFloat(e[k] || 0), 0), 0);
       return { week_key: wk, status, total_hours: total, billable_hours: billable, entry_count: entries.length };
+    },
+  },
+  {
+    name: 'register_user',
+    description: 'Registers a user name mapped to their Slack user ID. After registration, all tools accept the name instead of the Slack ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Short name for the user, e.g. "jessica"' },
+        slack_user_id: { type: 'string', description: 'Slack user ID, e.g. "U08LYKBH7EQ"' },
+      },
+      required: ['name', 'slack_user_id'],
+    },
+    handler: async ({ name, slack_user_id }) => {
+      const user = await db.upsertUser(name, slack_user_id);
+      return { success: true, user };
+    },
+  },
+  {
+    name: 'list_users',
+    description: 'Returns all registered users and their Slack IDs.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+    handler: async () => {
+      const users = await db.listUsers();
+      return { users };
     },
   },
   {
@@ -175,15 +207,15 @@ const tools = [
       required: ['user_id', 'project', 'case_task_event', 'service_team', 'billable', 'billing'],
     },
     handler: async (args) => {
+      const uid = await resolveUser(args.user_id);
       const wk = args.week_key || db.currentWeekKey();
 
-      // Open DM with the user
-      const dm = await slack.conversations.open({ users: args.user_id });
+      const dm = await slack.conversations.open({ users: uid });
       const channel = dm.channel.id;
 
       // Create pending entry (no slack_ts yet)
       const pending = await db.createPendingEntry({
-        user_id: args.user_id,
+        user_id: uid,
         week_key: wk,
         slack_channel: channel,
         project: args.project,

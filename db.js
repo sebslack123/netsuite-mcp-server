@@ -5,6 +5,10 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejec
 
 async function migrate() {
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      name TEXT PRIMARY KEY,
+      slack_user_id TEXT NOT NULL UNIQUE
+    );
     CREATE TABLE IF NOT EXISTS time_entries (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id TEXT NOT NULL,
@@ -194,8 +198,36 @@ async function movePendingToCommitted(id) {
   return committed;
 }
 
+async function upsertUser(name, slackUserId) {
+  const { rows } = await pool.query(
+    `INSERT INTO users (name, slack_user_id) VALUES ($1, $2)
+     ON CONFLICT (name) DO UPDATE SET slack_user_id=EXCLUDED.slack_user_id
+     RETURNING *`,
+    [name.toLowerCase(), slackUserId]
+  );
+  return rows[0];
+}
+
+async function resolveUserId(nameOrId) {
+  if (!nameOrId) return null;
+  // If it looks like a Slack user ID (starts with U + alphanumeric), return as-is
+  if (/^U[A-Z0-9]+$/i.test(nameOrId)) return nameOrId;
+  // Otherwise look up by name
+  const { rows } = await pool.query(
+    `SELECT slack_user_id FROM users WHERE name=$1`,
+    [nameOrId.toLowerCase()]
+  );
+  return rows[0]?.slack_user_id || nameOrId;
+}
+
+async function listUsers() {
+  const { rows } = await pool.query(`SELECT name, slack_user_id FROM users ORDER BY name`);
+  return rows;
+}
+
 module.exports = {
   migrate, getWeekEntries, addTimeEntry, updateTimeEntry, deleteTimeEntry,
   getTimesheetStatus, setTimesheetStatus, currentWeekKey,
   createPendingEntry, getPendingEntry, updatePendingEntry, deletePendingEntry, movePendingToCommitted,
+  upsertUser, resolveUserId, listUsers,
 };
